@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --card: 0 0% 100%;
+    --link: #4a5568;
+    --subtn: white;
+    --borderbtn: 220 10% 85%;
+    --accentbtn: 220 90% 60%;
+    --foreground-secondarybtn: 220 15% 20%;
+    --nav: rgba(255, 255, 255, 0.2);
+    --verification-bg: #f9fafb;
+    --verification-text: #111827;
+    --verification-card-bg: #ffffff;
+    --verification-card-border: #e5e7eb;
+  }
+
+  .dark {
+    --card: 220 15% 15%;
+    --link: #edf2f7;
+    --subtn: black;
+    --borderbtn: 220 10% 25%;
+    --accentbtn: 220 100% 70%;
+    --foreground-secondarybtn: 220 15% 90%;
+    --nav: rgba(17, 24, 39, 0.4);
+    --verification-bg: linear-gradient(to bottom right, #0f172a, #1e293b);
+    --verification-text: #ffffff;
+    --verification-card-bg: rgba(255, 255, 255, 0.1);
+    --verification-card-border: rgba(255, 255, 255, 0.2);
+  }
+}
