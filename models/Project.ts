@@ -1,4 +1,6 @@
 import mongoose, { Schema, Document } from "mongoose";
+// Ensure Manager model is registered before referencing it in refs
+import "./Manager";
 
 const internAssignmentSchema = new Schema(
   {

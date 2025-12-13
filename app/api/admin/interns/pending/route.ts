@@ -121,18 +121,26 @@ export async function PATCH(req: Request) {
     const base64Data = offerLetter.data.split(",")[1];
 
     try {
+      const smtpPort = Number(process.env.SMTP_PORT) || 587;
       const transporter = nodemailer.createTransport({
         host: process.env.SMTP_HOST,
-        port: Number(process.env.SMTP_PORT),
-        secure: true,
+        port: smtpPort,
+        secure: smtpPort === 465, // implicit TLS for 465, STARTTLS for 587
+        requireTLS: smtpPort !== 465,
         auth: {
           user: process.env.SMTP_USER,
           pass: process.env.SMTP_PASS,
         },
+        tls: { minVersion: 'TLSv1.2', rejectUnauthorized: false },
+        connectionTimeout: 20000,
+        greetingTimeout: 20000,
+        socketTimeout: 20000,
+        logger: true,
+        debug: true,
       });
 
       const mailOptions = {
-        from: `"ISMS Support Team" <${process.env.SMTP_FROM}>`,
+        from: `"ISMS Support Team" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
         to: intern.email,
         subject: "Welcome to ISMS Internship Portal – Your Account Details",
         html: `
@@ -168,13 +176,38 @@ export async function PATCH(req: Request) {
         ],
       };
 
-      await transporter.sendMail(mailOptions);
+      // Verify connection first
+      try {
+        console.log('Verifying SMTP connection for', process.env.SMTP_HOST, smtpPort);
+        await transporter.verify();
+        console.log('SMTP verify succeeded');
+      } catch (vErr) {
+        console.error('SMTP verify failed:', vErr);
+        return NextResponse.json({ error: 'Failed to verify SMTP connection' }, { status: 500 });
+      }
+
+      // send with retries
+      let sendErr: any = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          console.log(`sendMail attempt ${attempt} to ${intern.email}`);
+          await transporter.sendMail(mailOptions);
+          sendErr = null;
+          console.log('Activation email sent successfully');
+          break;
+        } catch (e) {
+          sendErr = e;
+          console.error(`sendMail attempt ${attempt} failed:`, e);
+          if (attempt < 3) await new Promise((r) => setTimeout(r, 500 * attempt));
+        }
+      }
+      if (sendErr) {
+        console.error('All send attempts failed:', sendErr);
+        return NextResponse.json({ error: 'Failed to send activation email' }, { status: 500 });
+      }
     } catch (err) {
-      console.error("Error sending activation email:", err);
-      return NextResponse.json(
-        { error: "Failed to send activation email" },
-        { status: 500 }
-      );
+      console.error('Error sending activation email:', err);
+      return NextResponse.json({ error: 'Failed to send activation email' }, { status: 500 });
     }
 
     return NextResponse.json({

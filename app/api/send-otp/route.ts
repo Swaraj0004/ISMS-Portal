@@ -19,12 +19,29 @@ export async function POST(req: NextRequest) {
       { upsert: true }
     );
 
+    const smtpPort = Number(process.env.SMTP_PORT) || 587;
     const transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT),
-      secure: true,
+      port: smtpPort,
+      secure: smtpPort === 465, // true for 465 (implicit SSL), false for 587 (STARTTLS)
+      requireTLS: smtpPort !== 465, // force STARTTLS when not using implicit SSL
       auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+      tls: { minVersion: "TLSv1.2", rejectUnauthorized: false },
+      connectionTimeout: 20000,
+      greetingTimeout: 20000,
+      socketTimeout: 20000,
     });
+
+    // Verify connection before attempting to send
+    try {
+      await transporter.verify();
+    } catch (verifyErr) {
+      console.error("SMTP verify failed:", verifyErr);
+      return NextResponse.json(
+        { error: "SMTP connection verification failed" },
+        { status: 500 }
+      );
+    }
 
     const htmlMessage = `
       <p>Dear <strong>${fullName || "User"}</strong>,</p>
@@ -37,12 +54,30 @@ export async function POST(req: NextRequest) {
       <p>Best regards,<br/>ISMS Support Team<br/>Maharashtra Remote Sensing Application Center (MRSAC)</p>
     `;
 
-    await transporter.sendMail({
+    const mailOptions = {
       from: `"ISMS Support Team" <${process.env.SMTP_USER}>`,
       to: email,
       subject: "Verify Your Email Address – ISMS Internship Portal",
       html: htmlMessage,
-    });
+    };
+
+    // Retry logic: up to 3 attempts with exponential backoff
+    let lastErr: any = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await transporter.sendMail(mailOptions);
+        lastErr = null;
+        break;
+      } catch (sendErr) {
+        lastErr = sendErr;
+        console.error(`sendMail attempt ${attempt} failed:`, sendErr);
+        if (attempt < 3) await new Promise((r) => setTimeout(r, 500 * attempt));
+      }
+    }
+    if (lastErr) {
+      console.error("All sendMail attempts failed:", lastErr);
+      return NextResponse.json({ error: "Failed to send OTP" }, { status: 500 });
+    }
 
     return NextResponse.json({ message: "OTP sent successfully" });
   } catch (err) {

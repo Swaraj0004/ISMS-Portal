@@ -5,12 +5,8 @@ import nodemailer from "nodemailer";
 
 export const config = { api: { bodyParser: true } };
 
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT),
-  secure: true,
-  auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-});
+// Create transport per-request to avoid stale global connections and allow
+// runtime verification and verbose logging for TLS handshake issues.
 
 export async function POST(req: NextRequest) {
   await dbConnect();
@@ -107,39 +103,76 @@ export async function POST(req: NextRequest) {
     });
 
     (async () => {
-      try {
-        await transporter.sendMail({
-          from: `"ISMS Support" <${process.env.SMTP_USER}>`,
-          to: email,
-          subject: "ISMS Internship Interview Schedule Confirmation",
-          html: `
+      const smtpPort = Number(process.env.SMTP_PORT) || 587;
+      const mailOptions = {
+        from: `"ISMS Support" <${process.env.SMTP_USER}>`,
+        to: email,
+        subject: "ISMS Internship Interview Schedule Confirmation",
+        html: `
             <p>Dear ${fullName},</p>
             <p>Warm greetings from the Maharashtra Remote Sensing Application Center (MRSAC).</p>
             <p>Your registration is successful. Here are your interview details:</p>
             <p><strong>Date:</strong> ${interviewDate.toLocaleDateString(
-            "en-US",
-            {
-              timeZone: "Asia/Kolkata",
-              weekday: "long",
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            }
-          )}<br/>
+              "en-US",
+              {
+                timeZone: "Asia/Kolkata",
+                weekday: "long",
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+              }
+            )}<br/>
             <strong>Time:</strong> ${interviewDate.toLocaleTimeString("en-US", {
-            timeZone: "Asia/Kolkata",
-            hour: "2-digit",
-            minute: "2-digit",
-          })}<br/>
+              timeZone: "Asia/Kolkata",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}<br/>
             <strong>Mode:</strong> Offline<br/>
             <strong>Venue:</strong> MRSAC, VNIT Campus, S.A. Rd, Nagpur, Maharashtra, India - 440010</p>
             <p>Please contact [Support Email] for rescheduling or queries.</p>
             <p>Best regards,<br/>ISMS Support Team<br/>MRSAC</p>
           `,
-        });
-      } catch (err) {
-        console.error("Failed to send confirmation email:", err);
+      };
+
+      const transporterLocal = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: smtpPort,
+        secure: smtpPort === 465,
+        requireTLS: smtpPort !== 465,
+        auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+        tls: { minVersion: "TLSv1.2", rejectUnauthorized: false },
+        connectionTimeout: 20000,
+        greetingTimeout: 20000,
+        socketTimeout: 20000,
+        logger: true,
+        debug: true,
+      });
+
+      try {
+        console.log("Attempting transporter.verify for host/port:", process.env.SMTP_HOST, smtpPort);
+        await transporterLocal.verify();
+        console.log("SMTP verify succeeded");
+      } catch (verifyErr) {
+        console.error("SMTP verify failed:", verifyErr);
+        return;
       }
+
+      // Retry logic for sendMail
+      let sendErr: any = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          console.log(`sendMail attempt ${attempt} options:`, { host: process.env.SMTP_HOST, port: smtpPort, secure: smtpPort === 465 });
+          await transporterLocal.sendMail(mailOptions);
+          sendErr = null;
+          console.log("Confirmation email sent successfully");
+          break;
+        } catch (e) {
+          sendErr = e;
+          console.error(`sendMail attempt ${attempt} failed:`, e);
+          if (attempt < 3) await new Promise((r) => setTimeout(r, 500 * attempt));
+        }
+      }
+      if (sendErr) console.error("All send attempts failed:", sendErr);
     })();
 
     return NextResponse.json({
